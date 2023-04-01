@@ -2,7 +2,7 @@
 - 👀 I’m interested in ML DL chemical engineering modelling
 - 🌱 I’m currently learning DL
 - 💞️ I’m looking to collaborate on DL project on Chemical engineering
-- 📫 How to reach me : mail:    info@mohammadrezajahnbakhsh.ir
+- 📫 How to reach me : mail:    
 -                                m.jahanbakhsh.esf@gmail.com
 
 <!---
