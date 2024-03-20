@@ -1,0 +1,112 @@
+import matplotlib.pyplot as plt
+import numpy as np 
+class Compressor:
+    """
+    Represents a compressor with flow rate, discharge pressure, efficiency, and estimated CAPEX.
+    """
+
+    def __init__(self, flow_rate, discharge_pressure, efficiency, material="Steel", cp=1.4):
+        self.flow_rate = flow_rate  # in cubic meters per minute (m^3/min)
+        self.discharge_pressure = discharge_pressure  # in bar
+        self.efficiency = efficiency  # efficiency ratio (0 to 1)
+        self.material = material
+        self.cp = cp  # Specific heat ratio of the gas
+        self.inlet_pressure = 1.0  # Assuming atmospheric pressure (can be modified)
+
+        if self.efficiency <= 0:
+            raise ValueError("Efficiency cannot be zero or negative")
+
+    def calculate_power(self, cp=None, efficiency=None):
+        """
+        Calculates the power consumption of the compressor using a more accurate formula.
+
+        Args:
+            cp (float, optional): Specific heat ratio of the gas. Defaults to attribute value (self.cp).
+        """
+        cp = cp or self.cp  # Use provided cp or class attribute if not specified
+        efficiency = efficiency or self.efficiency
+        power = (self.flow_rate * self.discharge_pressure * (self.discharge_pressure / self.inlet_pressure) ** ((cp - 1) / cp)) / (229 * self.efficiency)
+        return power  # in kW
+
+    def estimate_capex(self, base_cost_per_kw=800, material_factor={"Steel": 1.0, "Stainless Steel": 1.2}):
+        """
+        Estimates the Capital Expenditure (CAPEX) based on power and material selection.
+
+        Args:
+            base_cost_per_kw (float, optional): Base cost per kW of compressor power. Defaults to 800.
+            material_factor (dict, optional): Material cost factor dictionary. Defaults to {"Steel": 1.0, "Stainless Steel": 1.2}.
+        """
+        if self.material not in material_factor:
+            raise ValueError("Material not supported for CAPEX estimation")
+
+        power = self.calculate_power()
+        capex = base_cost_per_kw * power * material_factor[self.material]
+        return capex
+
+
+def get_input():
+    """
+    Gets input parameters from the user.
+    """
+    while True:
+        try:
+            flow_rate = float(input("Enter flow rate (m^3/min): "))
+            discharge_pressure = float(input("Enter discharge pressure (bar): "))
+            efficiency = float(input("Enter efficiency (0 to 1): "))
+            material = input("Enter material (Steel/Stainless Steel): ")
+            cp = float(input("Enter specific heat ratio (optional, defaults to 1.4): ")) or 1.4
+            inlet_pressure = float(input("Enter inlet pressure (bar, optional, defaults to 1): ")) or 1.0
+
+            if efficiency <= 0 or efficiency > 1:
+                raise ValueError("Efficiency must be between 0 and 1")
+
+            return flow_rate, discharge_pressure, efficiency, material, cp, inlet_pressure
+        except ValueError as ve:
+            print("Invalid input:", ve)
+
+
+def main():
+    """
+    Example usage of the Compressor class with demonstration and graph.
+    """
+    try:
+        flow_rate, discharge_pressure, efficiency, material, cp, inlet_pressure = get_input()
+        compressor = Compressor(flow_rate, discharge_pressure, efficiency, material, cp)
+        compressor.inlet_pressure = inlet_pressure  # Set inlet pressure after object creation (optional user input)
+
+        power = compressor.calculate_power()
+        capex = compressor.estimate_capex()
+
+        print("Required Power: {:.2f} kW".format(power))
+        print("Estimated CAPEX for {} compressor: ${:,.2f}".format(material, capex))
+
+        # Demonstration: Power vs. Flow Rate at different efficiencies
+        flow_rates = range(50, 250, 10)  # Sample flow rates (m^3/min)
+        powers = []
+        efficiencies = [0.7, 0.8, 0.9]  # Different efficiencies to plot
+
+        for rate in flow_rates:
+            for eff in efficiencies:
+                comp = Compressor(rate, discharge_pressure, eff)  # Assuming constant discharge pressure
+                powers.append(comp.calculate_power(efficiency=eff))
+
+        # Plotting (assuming you have imported matplotlib.pyplot as plt)
+        plt.figure(figsize=(8, 6))
+        for i, eff in enumerate(efficiencies):
+            plt.plot(flow_rates, powers[i::len(efficiencies)], marker='o', label=f'Efficiency = {eff:.1f}')
+        plt.xlabel("Flow Rate (m^3/min)")
+        plt.ylabel("Power Consumption (kW)")
+        plt.title("Power vs. Flow Rate for Different Compressor Efficiencies")
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+
+    except ValueError as ve:
+        print("Error:", ve)
+
+
+
+
+if __name__ == "__main__":
+    main()
+
