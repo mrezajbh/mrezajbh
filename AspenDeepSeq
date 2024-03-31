@@ -1,0 +1,146 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+from sklearn.ensemble import RandomForestRegressor
+from tensorflow.keras import optimizers
+from kerastuner.tuners import RandomSearch
+from sklearn.linear_model import LinearRegression
+
+# Load and process Excel sheets
+def load_and_process_sheet(file_path, sheet_name):
+    df = pd.read_excel(file_path, sheet_name=sheet_name, engine='openpyxl')
+    X = df['Parameter'].values.reshape(-1, 1)
+    y = df['CO2 CAPTURE'].values
+    
+    scaler = StandardScaler()
+    X = scaler.fit_transform(X)
+    
+    return X, y
+
+# Build and train deep learning model
+def build_model(hp):
+    model = Sequential()
+    model.add(Dense(units=hp.Int('units', min_value=32, max_value=256, step=32),
+                    activation='relu', input_shape=(1,)))
+    model.add(Dense(units=hp.Int('units', min_value=32, max_value=256, step=32),
+                    activation='relu'))
+    model.add(Dense(1))
+
+    model.compile(optimizer=optimizers.Adam(hp.Choice('learning_rate', values=[1e-2, 1e-3, 1e-4])),
+                  loss='mse', metrics=['mae'])
+
+    return model
+
+def create_and_train_model(X_train, y_train, sheet_name):
+    tuner = RandomSearch(
+        build_model,
+        objective='val_mae',
+        max_trials=20,
+        executions_per_trial=3,
+        directory='tuning_results',
+        project_name=sheet_name,
+        seed=42)
+
+    tuner.search(X_train, y_train, epochs=50, batch_size=16, validation_split=0.1, verbose=0)
+
+    best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
+    print(f"Best hyperparameters for {sheet_name}: {best_hps}")
+
+    model = tuner.hypermodel.build(best_hps)
+    model.fit(X_train, y_train, epochs=100, batch_size=16, validation_split=0.1, verbose=0)
+
+    return model
+
+
+
+# Plot error figure
+def plot_error_figure(y_true, y_pred, sheet_name):
+    error = y_true - y_pred
+    plt.figure()
+    plt.plot(range(len(error)), error, 'o', label="Error")
+    plt.xlabel("Index")
+    plt.ylabel("Error (True - Predicted)")
+    plt.title(f"Error for {sheet_name}")
+    plt.legend()
+    plt.show()
+
+# Plot predicted vs true data
+def plot_predicted_vs_true(y_true, y_pred, sheet_name):
+    plt.figure()
+    plt.scatter(y_true, y_pred, label="Predicted vs True")
+    plt.xlabel("True CO2 CAPTURE ")
+    plt.ylabel("Predicted CO2 CAPTURE ")
+    plt.title(f"Predicted vs True CO2 CAPTURE for {sheet_name}")
+    plt.legend()
+    plt.show()
+    
+def train_random_forest(X_train, y_train):
+    rf = RandomForestRegressor(n_estimators=100, random_state=42)
+    rf.fit(X_train, y_train)
+    return rf
+    
+# Main function
+from sklearn.model_selection import KFold
+
+def main(file_path, sheet_names, n_splits=5):
+    models = []
+    results_df = pd.DataFrame()
+
+    for i, sheet_name in enumerate(sheet_names):
+        print(f"Processing sheet: {sheet_name}")
+        X, y = load_and_process_sheet(file_path, sheet_name)
+        
+        # Perform cross-validation to estimate model performance
+        kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+        for j, (train_index, test_index) in enumerate(kf.split(X)):
+            X_train, X_test = X[train_index], X[test_index]
+            y_train, y_test = y[train_index], y[test_index]
+            
+            if i < 7:  # Perform hyperparameter tuning only for sheets 1-7
+                model = create_and_train_model(X_train, y_train, sheet_name)
+            else:
+                model = create_and_train_model_no_tuning(X_train, y_train)
+
+            # Train Random Forest model
+            rf_model = train_random_forest(X_train, y_train)
+
+            # Add models to the list
+            models.append((model, rf_model))
+
+            # Test the models
+            dl_y_pred = model.predict(X_test).flatten()
+            rf_y_pred = rf_model.predict(X_test)
+
+            # Stack the predictions
+            stacked_X_test = np.column_stack((dl_y_pred, rf_y_pred))
+
+            # Train a final model to make the final prediction
+            final_model = LinearRegression()
+            final_model.fit(stacked_X_test, y_test)
+            stacked_y_pred = final_model.predict(stacked_X_test)
+
+            # Plot error figure
+            plot_error_figure(y_test, stacked_y_pred, sheet_name + f"_fold{j}")
+
+            # Plot predicted vs true data
+            plot_predicted_vs_true(y_test, stacked_y_pred, sheet_name + f"_fold{j}")
+
+            # Save true and predicted values to a new DataFrame
+            temp_df = pd.DataFrame({'True': y_test, 'Predicted': stacked_y_pred})
+            temp_df['Sheet'] = sheet_name
+            temp_df['Fold'] = j
+            results_df = results_df.append(temp_df, ignore_index=True)
+
+            # Print model specifications
+            print(f"Model specifications for {sheet_name} - Fold {j}:")
+            print(final_model.coef_)
+            print(final_model.intercept_)
+
+    # Save results to a new Excel file
+    results_df.to_excel("results.xlsx", index=False, engine='openpyxl')
+
+    return models
