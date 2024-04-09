@@ -1,0 +1,279 @@
+import numpy as np
+from scipy.optimize import fsolve
+
+def calculate_co2_concentration(T, P, CMDEAt, CPZt, alpha):
+    # Constants and initializations
+    Phi_CO2 = calculate_co2_phi(T, P)
+    H_CO2 = np.exp(94.4914 - 6789.04 / T - 11.4519 * np.log(T) - 0.01045 * T)
+
+    # Calculate K
+    K = np.zeros(8)
+    K_equations = [
+        (140.932, -13455.9, -22.4773, 0),
+        (0.1321, 5.341, 1.921, -0.0916),
+        (23.5482, -12092.1, 0, 0),
+        (-0.091, 0.133, 0.521, -0.0526),
+        (220.067, -12431.7, -3548.19, 0),
+        (-41.583, 9288.2, 0, 0),
+        (-13.041, -3961.6, 0, 0),
+        (-44.7, 9288.2, 0, 0)
+    ]
+    for i, (a, b, c, d) in enumerate(K_equations):
+        K[i] = np.exp(a + b / T + c * np.log(T) + d * T)
+
+    # Calculate Bij
+    Bij = np.zeros((13, 13))
+    Bij_equations = [
+        # (i, j, a, b, c)
+        (1, 2, 98252.1, 1502.34, 1.013),
+        (7, 9, 3225.32, -32.5, 0.017),
+        (5, 7, 200.21, -17.2, 0.14),
+        (7, 8, 102658.2, -10.3, 0.1),
+        (7, 11, 58355.32, -310.3, 0.12),
+        (8, 11, 39009.012, -0.0265, 0.01),
+        (1, 8, 76091.32, -99.325, -0.03),
+        (1, 9, 5.36, -90.714, -0.1038),
+        (5, 11, 1594.21, -10.214, 0.08),
+        (1, 11, 1205.3, -71.2, 0.113),
+        (7, 10, 9650.8, -9.88, 0.021),
+        (6, 8, 102.3, -60.2, 0.16),
+        (1, 10, 11025.12, -9.69, 0.001),
+        (5, 10, 95.12, -151.06, 0.38),
+        (2, 5, 89258.5, 74.3, 0.014),
+        (2, 7, 125.32, -3451.06, 1.25)
+    ]
+    for i, j, a, b, c in Bij_equations:
+        Bij[i - 1, j - 1] = Bij[j - 1, i - 1] = a + b / T + c / T ** 2
+
+
+
+    # Main loop
+    A = 1.306548 + 0.1328238 * 1e-1 / T - 0.3550803 * 1e-4 / T ** 2 + 0.3381968 * 1e-7 / T ** 3
+    B = 1.2
+    row = 1000  # Density of water
+    Zi = np.array([1, -1, 0, -2, 0, 1, 1, 0, 0, -2, -1, -1, 0])
+    Ci = 0.001 * np.ones(13)
+    Ci0 = Ci.copy()
+    max_iterations = 1000  # Maximum number of iterations
+    iteration = 0  # Iteration counter
+    while iteration < max_iterations:
+        # Calculating I
+        I = np.sum(Ci * Zi ** 2 / (2 * row))
+        
+        # Calculating gamma
+        Gamma = np.zeros(13)
+        for i in range(13):
+            SigmaBijmj = np.sum(Bij[i, :] * Ci / row)
+            Gamma[i] = np.exp(-(A * Zi[i] ** 2 * np.sqrt(I)) / (1 + B * np.sqrt(I)) + 2 * SigmaBijmj)
+
+        # Concentration equations
+        def concentration_equations(Ci, Phi_CO2, H_CO2, K, Gamma, Pressure, TotalMDEAConcentration, TotalPZConcentration, Alpha):
+            F = np.zeros(13)
+            F[0] = K[0] - Ci[5] * Ci[11] / Ci[12] * Gamma[5] * Gamma[11] / Gamma[12]
+            F[1] = K[1] - Ci[5] * Ci[7] / Ci[6] * Gamma[5] * Gamma[7] / Gamma[6]
+            F[2] = K[2] - Ci[5] * Ci[10] / (Ci[8] * Ci[12]) * Gamma[5] * Gamma[10] / (Gamma[8] * Gamma[12])
+            F[3] = K[3] - Ci[4] * Ci[5] / Ci[0] * Gamma[4] * Gamma[5] / Gamma[0]
+            F[4] = K[4] - Ci[5] * Ci[9] / Ci[10] * Gamma[5] * Gamma[9] / Gamma[10]
+            F[5] = K[5] - Ci[1] * Ci[5] / (Ci[4] * Ci[8]) * Gamma[1] * Gamma[5] / (Gamma[4] * Gamma[8])
+            F[6] = K[6] - Ci[1] * Ci[5] / Ci[2] * Gamma[1] * Gamma[5] / Gamma[2]
+            F[7] = K[7] - Ci[3] * Ci[5] / (Ci[1] * Ci[8]) * Gamma[3] * Gamma[5] / (Gamma[1] * Gamma[8])
+            F[8] = Ci[0] + Ci[5] + Ci[6] - Ci[1] - 2 * Ci[3] - 2 * Ci[9] - Ci[10] - Ci[11]
+            F[9] = Alpha * (TotalMDEAConcentration + TotalPZConcentration) - Ci[1] - Ci[2] - Ci[3] - Ci[8] - Ci[9] - Ci[10]
+            F[10] = TotalMDEAConcentration - Ci[6] - Ci[7]
+            F[11] = TotalPZConcentration - Ci[0] - Ci[1] - Ci[2] - Ci[3] - Ci[4]
+            F[12] = Phi_CO2 * Pressure / (H_CO2 * 1000) - Gamma[8] * Ci[8]
+            return F
+
+        # Solve concentration equations
+        Ci, info, ier, mesg = fsolve(concentration_equations, Ci0, args=(Phi_CO2, H_CO2, K, Gamma, P, CMDEAt, CPZt, alpha), full_output=True)
+        Ci = filter_concentration(Ci)
+
+        # Convergence check
+        iteration += 1
+        print(f"Iteration: {iteration}, ier: {ier}, Message: {mesg}")
+        
+        if ier in [1, 4]:
+            break
+        else:
+            Ci = Ci
+
+    return Ci[9]
+
+def calculate_co2_phi(T, P):
+    # Constants
+    R = 8.314  # Gas constant
+    Tc = 304.25  # Critical temperature of CO2
+    Pc = 7.39e6  # Critical pressure of CO2
+    w = 0.228  # Acentric factor of CO2
+
+    # Peng-Robinson Parameters
+    sigma = 1 + np.sqrt(2)
+    epsilon = 1 - np.sqrt(2)
+    omega = 0.0778
+    sai = 0.45724
+    Tr = T / Tc  # Reduced temperature
+    alpha = (1 + (0.37464 + 1.54226 * w - 0.26992 * w**2) * (1 - np.sqrt(Tr)))**2
+    a = sai * alpha * R**2 * Tc**2 / Pc
+    b = omega * R * Tc / Pc
+    beta = b * P / (R * T)
+    q = a / (b * R * T)
+
+    # Compressibility Factor
+    z = compress_factor_vapor(T, P, Tc, Pc, w)
+
+    # Calculating Phi
+    I = 1 / (sigma - epsilon) * np.log((z + sigma * beta) / (z + epsilon * beta))
+    Phi_CO2 = np.exp(z - 1 - np.log(z - beta) - q * I)
+
+    return Phi_CO2
+
+def compress_factor_vapor(T, P, Tc, Pc, w):
+    # Constants for Peng-Robinson Equation of State
+    R = 8.314  # Universal gas constant
+    sigma = 1 + np.sqrt(2)
+    epsilon = 1 - np.sqrt(2)
+    omega = 0.0778
+    sai = 0.45724
+
+    # Reduced properties
+    Tr = T / Tc
+    alpha = (1 + (0.37464 + 1.54226 * w - 0.26992 * w**2) * (1 - np.sqrt(Tr)))**2
+    a = sai * alpha * R**2 * Tc**2 / Pc
+    b = omega * R * Tc / Pc
+
+    # Coefficients of the cubic equation of state
+    A = a * P / (R**2 * T**2)
+    B = b * P / (R * T)
+
+    # Solve the cubic equation for Z (compressibility factor)
+    coeffs = [1, -(1 - B), (A - 2 * B - 3 * B**2), -(A * B - B**2 - B**3)]
+    roots = np.roots(coeffs)
+
+    # Selecting the real root that represents the vapor phase
+    z = np.real(roots[roots.imag == 0].max())
+
+    return z
+
+def filter_concentration(C):
+    # Filter the concentration values to be non-negative
+    return np.where(C < 0, 0, C)
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.optimize import fsolve
+
+def calculate_k_values(T):
+    # K values calculation
+    K = np.zeros(8)
+    K_equations = [
+        (140.932, -13455.9, -22.4773, 0),
+        (0.1321, 5.341, 1.921, -0.0916),
+        (23.5482, -12092.1, 0, 0),
+        (-0.091, 0.133, 0.521, -0.0526),
+        (220.067, -12431.7, -3548.19, 0),
+        (-41.583, 9288.2, 0, 0),
+        (-13.041, -3961.6, 0, 0),
+        (-44.7, 9288.2, 0, 0)
+    ]
+    for i, (a, b, c, d) in enumerate(K_equations):
+        K[i] = np.exp(a + b / T + c * np.log(T) + d * T)
+
+    return K
+
+# Temperature range for the plot
+temperatures = np.linspace(273, 373, 100)  # From 0°C to 100°C
+
+# Storing K values for each temperature
+K_values = np.array([calculate_k_values(T) for T in temperatures])
+
+# Plotting
+plt.figure(figsize=(12, 6))
+for i in range(8):
+    plt.plot(temperatures, K_values[:, i], label=f'K{i+1}')
+
+plt.title('Equilibrium Constants (K) Over Temperature')
+plt.xlabel('Temperature (K)')
+plt.ylabel('Equilibrium Constants (K)')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+
+from mpl_toolkits.mplot3d import Axes3D
+
+def calculate_co2_phi(T, P):
+    # Constants
+    R = 8.314  # Gas constant
+    Tc = 304.25  # Critical temperature of CO2
+    Pc = 7.39e6  # Critical pressure of CO2
+    w = 0.228  # Acentric factor of CO2
+
+    # Peng-Robinson Parameters
+    sigma = 1 + np.sqrt(2)
+    epsilon = 1 - np.sqrt(2)
+    omega = 0.0778
+    sai = 0.45724
+    Tr = T / Tc  # Reduced temperature
+    alpha = (1 + (0.37464 + 1.54226 * w - 0.26992 * w**2) * (1 - np.sqrt(Tr)))**2
+    a = sai * alpha * R**2 * Tc**2 / Pc
+    b = omega * R * Tc / Pc
+    beta = b * P / (R * T)
+    q = a / (b * R * T)
+
+    # Compressibility Factor
+    z = compress_factor_vapor(T, P, Tc, Pc, w)
+
+    # Calculating Phi
+    I = 1 / (sigma - epsilon) * np.log((z + sigma * beta) / (z + epsilon * beta))
+    Phi_CO2 = np.exp(z - 1 - np.log(z - beta) - q * I)
+
+    return Phi_CO2
+
+def compress_factor_vapor(T, P, Tc, Pc, w):
+    # Constants for Peng-Robinson Equation of State
+    R = 8.314  # Universal gas constant
+    sigma = 1 + np.sqrt(2)
+    epsilon = 1 - np.sqrt(2)
+    omega = 0.0778
+    sai = 0.45724
+
+    # Reduced properties
+    Tr = T / Tc
+    alpha = (1 + (0.37464 + 1.54226 * w - 0.26992 * w**2) * (1 - np.sqrt(Tr)))**2
+    a = sai * alpha * R**2 * Tc**2 / Pc
+    b = omega * R * Tc / Pc
+
+    # Coefficients of the cubic equation of state
+    A = a * P / (R**2 * T**2)
+    B = b * P / (R * T)
+
+    # Solve the cubic equation for Z (compressibility factor)
+    coeffs = [1, -(1 - B), (A - 2 * B - 3 * B**2), -(A * B - B**2 - B**3)]
+    roots = np.roots(coeffs)
+
+    # Selecting the real root that represents the vapor phase
+    z = np.real(roots[roots.imag == 0].max())
+
+    return z
+
+# Creating a mesh grid for T and P
+T_range = np.linspace(250, 400, 30)  # Temperature range from 250K to 400K
+P_range = np.linspace(1e5, 1e7, 30)  # Pressure range from 1 bar to 100 bar
+T_grid, P_grid = np.meshgrid(T_range, P_range)
+
+# Calculating Phi values
+Phi_grid = np.vectorize(calculate_co2_phi)(T_grid, P_grid)
+
+# Plotting
+fig = plt.figure(figsize=(10, 7))
+ax = fig.add_subplot(111, projection='3d')
+
+# Creating surface plot
+surf = ax.plot_surface(T_grid, P_grid, Phi_grid, cmap='viridis')
+
+ax.set_title('Fugacity Coefficient (Phi_CO2) Over Temperature and Pressure')
+ax.set_xlabel('Temperature (K)')
+ax.set_ylabel('Pressure (Pa)')
+ax.set_zlabel('Fugacity Coefficient (Phi_CO2)')
+fig.colorbar(surf, ax=ax, shrink=0.5, aspect=5)
+
+plt.show()
