@@ -1,0 +1,227 @@
+import numpy as np
+import sympy as sp
+from ipywidgets import interact, FloatSlider, fixed
+import numpy as np
+import matplotlib.pyplot as plt
+import sympy as sp
+
+def L_D(D_p):
+    """Calculate L/D ratio based on operating pressure."""
+    if not 0 < D_p <= 50:
+        return None
+    if D_p <= 20:
+        return 3
+    elif D_p <= 35:
+        return 4
+    elif D_p > 35:
+        return 5
+
+def simpleTerminalVelocity(rho_p, rho_f, demister, Ks=0.1):
+    """Calculate terminal velocity with option to adjust for demisters."""
+    if rho_p <= 0:
+        raise ValueError("Particle density must be positive")
+    vt = Ks * np.sqrt((rho_f - rho_p) / rho_p)
+    if not demister:
+        vt *= 0.15
+    return vt
+
+def VapVolFlowRate(VapMassFlowRate, rho_p):
+  Vv = VapMassFlowRate/(3600*rho_p)
+  return Vv
+def Dv(hv_Dv, Lv_Dv, simpleTerminalVelocity, VapVolFlowRate):
+    Dv = sp.symbols('Dv')
+    # First calculate the cross-sectional area for vapor flow
+    Av = sp.pi * (hv_Dv / 4) * Dv**2
+    # Calculate the uv
+    uv = VapVolFlowRate / Av
+    # hv/us
+    hv_us = hv_Dv * Dv / simpleTerminalVelocity
+    # Lv/uv
+    Lv_uv = Lv_Dv * Dv / uv
+    expr = hv_us - Lv_uv
+    sol = sp.solve(expr, Dv)
+    return sol
+def LiqVolFlowRate(LiqMassFlowRate, rho_f):
+  Vl = LiqMassFlowRate/(3600*rho_f)
+  return Vl
+def LiquidArea(Dv):
+  Al = np.pi*Dv**2/(4)*0.8 #assuming liquid area is 80% of total area
+  return Al
+
+
+## from vertical
+def HoldUpTime(Lv_Dv, Dv, Al, LiqVolFlowRate):
+  Lv = Lv_Dv*Dv
+  V_holdup = Al*Lv #Al = liquid area
+  t_holdup_s = V_holdup/LiqVolFlowRate #liquid hold up time in seconds
+  t_holdup = t_holdup_s/60 #converting liquid hold up time to minutes
+  return t_holdup
+def VolumeInVessel(liqVolFlowRate, liqholdup): #liquid volume
+  Vl_inVessel = liqVolFlowRate*liqholdup
+  return Vl_inVessel
+def liqDepth(VolumeInVessel, minVesselDiameter):
+  hv = VolumeInVessel/(np.pi*minVesselDiameter**2/4)
+  return hv
+def requiredHeight(minVesselDiameter, liqDepth):
+  Dv = minVesselDiameter
+  hv = liqDepth
+  H = Dv/2+ Dv + hv
+  return H
+def VolumeTotal(minVesselDiameter, L_D): #volume of total separator
+  V = (np.pi*minVesselDiameter**2)/4*(L_D*minVesselDiameter)
+  return V
+  t_holdup_demand = 0.5 #minutes
+  while t_holdup < t_holdup_demand:
+    Dv+=0.05
+    Al = LiquidArea(Dv)
+    t_holdup = HoldUpTime(Lv_Dv, Dv, Al, Vl)
+    Vl_invessel = VolumeInVessel(Vl, Dv)
+    hv = liqDepth(Vl_invessel, Dv)
+    H = requiredHeight(Dv, hv)
+    V = VolumeTotal(Dv, Lv_Dv)
+    t_holdup = HoldUpTime(Lv_Dv, Dv, Al, Vl)
+    print("Dv ",Dv)
+    print("t ", t_holdup)
+    
+rho_p = float(input("Enter density of the particle (kg/m^3): "))  # density of the particle
+rho_f = float(input("Enter density of the fluid (kg/m^3): "))  # density of the fluid
+demister_present = False
+velocity = simpleTerminalVelocity(rho_p, rho_f, demister_present, Ks)
+print("Calculated terminal velocity:", velocity)
+
+
+
+# Plotting L/D Ratio vs. Operating Pressure
+pressure_range = np.linspace(1, 50, 100)
+ld_ratios = [L_D(p) for p in pressure_range]
+
+plt.figure(figsize=(10, 5))
+plt.plot(pressure_range, ld_ratios, label='L/D Ratio')
+plt.xlabel('Operating Pressure (D_p)')
+plt.ylabel('L/D Ratio')
+plt.title('L/D Ratio vs. Operating Pressure')
+plt.grid(True)
+plt.show()
+
+# Plotting Terminal Velocity vs. Density Difference
+density_diff_range = np.linspace(50, 300, 100)
+rho_p = 1000  # density of the particle
+terminal_velocities = [simpleTerminalVelocity(rho_p, rho_p + diff, demister=False) for diff in density_diff_range]
+
+plt.figure(figsize=(10, 5))
+plt.plot(density_diff_range, terminal_velocities, label='Terminal Velocity')
+plt.xlabel('Density Difference (rho_f - rho_p)')
+plt.ylabel('Terminal Velocity (m/s)')
+plt.title('Terminal Velocity vs. Density Difference')
+plt.grid(True)
+plt.show()
+
+# Interactive Plot: L/D Ratio vs. Operating Pressure
+def plot_ld_ratio():
+    pressure_range = np.linspace(1, 50, 100)
+    ld_ratios = [L_D(p) for p in pressure_range]
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(pressure_range, ld_ratios, label='L/D Ratio', marker='o')
+    plt.xlabel('Operating Pressure (D_p)')
+    plt.ylabel('L/D Ratio')
+    plt.title('L/D Ratio vs. Operating Pressure')
+    plt.grid(True)
+    plt.show()
+
+# Interactive Plot for Terminal Velocity
+@interact(rho_p=FloatSlider(min=800, max=1200, step=10, value=1000), 
+          density_diff=FloatSlider(min=50, max=500, step=10, value=100))
+def interactive_terminal_velocity(rho_p, density_diff):
+    rho_f = rho_p + density_diff
+    demister = False  # Adjust based on your scenario
+    vt = simpleTerminalVelocity(rho_p, rho_f, demister)
+    
+    plt.figure(figsize=(10, 5))
+    plt.plot(density_diff, vt, 'ro')
+    plt.xlabel('Density Difference (rho_f - rho_p)')
+    plt.ylabel('Terminal Velocity (m/s)')
+    plt.title('Terminal Velocity for rho_p: {}'.format(rho_p))
+    plt.grid(True)
+    plt.show()
+
+# Constants
+Ks = 0.1  # Terminal velocity constant, assumed
+
+# Function to calculate terminal velocity
+def simpleTerminalVelocity(rho_p, rho_f, demister, Ks=0.1):
+    """Calculate terminal velocity with option to adjust for demisters."""
+    if rho_p <= 0:
+        raise ValueError("Particle density must be positive")
+    vt = Ks * np.sqrt((rho_f - rho_p) / rho_p)
+    if not demister:
+        vt *= 0.15
+    return vt
+
+# Interactive Plot for Terminal Velocity
+def plot_terminal_velocity(rho_p, density_diffs, demister=False):
+    plt.figure(figsize=(10, 5))
+    colors = plt.cm.viridis(np.linspace(0, 1, len(density_diffs)))  # Color map for lines
+
+    for i, diff in enumerate(density_diffs):
+        rho_f = rho_p + diff
+        vt = simpleTerminalVelocity(rho_p, rho_f, demister)
+        plt.plot(rho_p, vt, 'o', color=colors[i], label=f'Diff = {diff} kg/m³')
+
+    plt.xlabel('Particle Density (rho_p) kg/m³')
+    plt.ylabel('Terminal Velocity (m/s)')
+    plt.title('Terminal Velocity vs. Particle Density for Various Density Differences')
+    plt.legend(title='Density Difference')
+    plt.grid(True)
+    plt.show()
+
+# Interact function to control parameters
+@interact(rho_p=FloatSlider(min=800, max=1200, step=10, value=1000, description='Particle Density:'),
+          density_diffs=fixed([50, 100, 150, 200]),  # Fixed set of density differences
+          demister=fixed(False))  # Can add as a widget if variable
+def interactive_terminal_velocity(rho_p, density_diffs, demister):
+    plot_terminal_velocity(rho_p, density_diffs, demister)
+
+
+# Scenario 1: Effect of Ks on Terminal Velocity (example data)
+ks_values = np.array([0.05, 0.10, 0.15, 0.20])
+terminal_velocities = np.array([1.0, 1.4, 1.7, 2.0])  # m/s
+
+plt.figure(figsize=(8, 6))
+plt.plot(ks_values, terminal_velocities, marker='o', label='Terminal Velocity')
+plt.xlabel('Ks (Terminal Velocity Constant)')
+plt.ylabel('Terminal Velocity (m/s)')
+plt.title('Effect of Ks on Terminal Velocity (Example)')
+plt.grid(True)
+plt.legend()
+plt.show()
+
+# Scenario 2: Effect of Ks on Vessel Sizing (example data)
+ks_values = np.array([0.05, 0.10, 0.15, 0.20])
+min_vessel_diameters = np.array([0.5, 0.4, 0.3, 0.25])  # m
+liquid_hold_up_times = np.array([2.0, 1.5, 1.0, 0.8])  # minutes
+
+# Assuming multiple plots are desired (modify as needed)
+plt.figure(figsize=(12, 6))
+
+# Plot for minimum vessel diameter
+plt.subplot(1, 2, 1)
+plt.plot(ks_values, min_vessel_diameters, marker='s', label='Min Vessel Diameter')
+plt.xlabel('Ks (Terminal Velocity Constant)')
+plt.ylabel('Minimum Vessel Diameter (m)')
+plt.title('Effect of Ks on Minimum Vessel Diameter (Example)')
+plt.grid(True)
+plt.legend()
+
+# Plot for liquid hold-up time
+plt.subplot(1, 2, 2)
+plt.plot(ks_values, liquid_hold_up_times, marker='^', label='Liquid Hold-up Time')
+plt.xlabel('Ks (Terminal Velocity Constant)')
+plt.ylabel('Liquid Hold-up Time (minutes)')
+plt.title('Effect of Ks on Liquid Hold-up Time (Example)')
+plt.grid(True)
+plt.legend()
+
+plt.tight_layout()
+plt.show()
+plot_ld_ratio()
