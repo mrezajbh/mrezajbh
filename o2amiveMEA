@@ -1,0 +1,220 @@
+import math
+from scipy . interpolate import LinearNDInterpolator
+import numpy as np
+#Ion - concentration [ MEAH +, MEACOO -, HCO3 -]
+expData = np. array ([[0 , 0, 0], [0.38 , 0.38 , 0], [0.75 , 0.75 , 0],[1.17 , 1.17 , 0], [1.53 , 1.53 , 0], [1.89 , 1.89 , 0], [2.18 , 2.18 ,0], [0.008 , 0, 0], [0.63 , 0.63 , 0], [1.04 , 1.04 , 0], [1.18 ,
+1.18 , 0], [1.41 , 1.41 , 0], [1.71 , 1.71 , 0] ,[1.77 , 1.77 ,0] ,[2.14 , 2.14 , 0], [2.33 , 2.16 , 0.17] , [2.42 , 2.20 , 0.22] ,[2.49 ,2.09 , 0.39] ,[0, 0, 0], [0.64 , 0.64 , 0], [1.00 , 1.00 , 0], [1.31 , 1.31 ,
+0], [1.99 , 1.80 , 0.18] , [2.16 , 1.85 , 0.31] ,[0, 0, 0], [0.29 , 0.29 , 0], [0.60 , 0.60 , 0], [0.96 , 0.96 ,0], [1.43 , 1.43 , 0], [1.62 , 1.43 , 0.20] , [2.75 , 2.07 , 0.68]])   
+
+# Temperatures [K]
+x = np. array ([293.15 , 293.15 , 293.15 , 293.15 , 293.15 , 293.15 ,293.15 , 313.15 , 313.15 , 313.15 , 313.15 , 313.15 , 313.15 ,313.15 , 313.15 , 313.15 , 313.15 , 313.15 ,333.15 , 333.15 , 333.15 , 333.15 , 333.15 , 333.15 ,
+                353.15 , 353.15 , 353.15 , 353.15 , 353.15 , 353.15 ,
+              353.15])
+
+# Loading
+y = np. array ([0.0 , 0.075 , 0.15 , 0.235 , 0.309 , 0.388 , 0.474 ,0.0 , 0.13 , 0.21 , 0.24 , 0.28 , 0.34 , 0.35 , 0.46 , 0.47 ,0.49 , 0.51 ,0.0 , 0.13 , 0.20 , 0.28 , 0.42 , 0.49 , 0.0 , 0.06 , 0.14 , 0.25 ,
+                 0.34 , 0.40 , 0.51])
+
+# Interpolate to ion concentration based on loading and temperature
+my_interpolating = LinearNDInterpolator ((x, y), expData )
+
+# Solubility of O2 in water 
+def O2solubility (T, p_o2 ):
+    o2sol = (55.56* p_o2 )/( math .e **(3.71814 + (5596.17/ T) -(1049668/ T **2) )-p_o2 )
+    return o2sol # mol /L
+    
+h_meah = 0.0133 # m3kmol ^-1 ion - specific parameter
+
+h_meacoo = 0.1284 # m3kmol ^-1 ion - specific parameter
+
+h_hco3 = 0.0967 # m3kmol ^-1 ion - specific parameter
+
+h_G0_o2 = 0 # m3kmol ^-1 gas - specific parameter
+
+h_T_o2 = -0.000334 # m3kmol ^-1 K^-1 gas specific parameter
+
+T_ref = 298.15 #K
+
+from functools import lru_cache
+
+@lru_cache(maxsize=128)  # Adjust maxsize based on expected usage patterns
+def o2inloadedmea(myTemp, myAlpha, p_o2):
+    ion_cons = my_interpolating (myTemp , myAlpha )
+    h_G_o2 = ( h_G0_o2 + h_T_o2 )*( myTemp - T_ref )
+    c_G_0 = O2solubility (myTemp , p_o2 )
+    logC0_logC = ( h_meah + h_G_o2 )* ion_cons [0] + ( h_meacoo + h_G_o2 )*ion_cons [1] + ( h_hco3 + h_G_o2 )* ion_cons [2]
+    C0_C = 10**( logC0_logC )
+    return c_G_0 / C0_C # Dissolved O2 in MEA ( temperature = myTemp ,loading = myAlpha , partial pressure O2 = p_o2 [ bar ])
+
+#Rooney
+import math
+ppO2 = 0.12
+rholiq = 1090.8
+MWO2 = 32
+P = 1.0
+def RooneyO2 (myTemp , myO2InFlueGas ):
+    x1 = 1/ math . exp (3.71814 + (5596.17/ myTemp ) -(1049668/( myTemp**2) ))
+    ppm1 = x1 *(32/18) *1000000* ppO2
+    C1 = ppm1 * rholiq *10**( -6) / MWO2
+    H = ppO2 *P/C1
+    C_O2 = myO2InFlueGas *P/H
+    return C_O2
+
+
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+
+ax.scatter(x, y, expData[:, 0], c='r', marker='o', label='MEAH+')
+ax.scatter(x, y, expData[:, 1], c='b', marker='^', label='MEACOO-')
+ax.scatter(x, y, expData[:, 2], c='g', marker='s', label='HCO3-')
+
+ax.set_xlabel('Temperature (K)')
+ax.set_ylabel('Loading')
+ax.set_zlabel('Ion Concentration')
+plt.legend()
+plt.show()
+
+temp_grid, loading_grid = np.mgrid[x.min():x.max():100j, y.min():y.max():100j]
+points = np.vstack([temp_grid.ravel(), loading_grid.ravel()]).T
+concentrations = my_interpolating(points)  # Get interpolated values
+
+temperatures = np.linspace(290, 360, 50)
+solubilities = [O2solubility(T, ppO2) for T in temperatures] 
+
+plt.plot(temperatures, solubilities)
+plt.xlabel('Temperature (K)')
+plt.ylabel('O2 Solubility (mol/L)')
+plt.show()
+
+# Re-importing necessary libraries
+import numpy as np
+import matplotlib.pyplot as plt
+import math
+from scipy.interpolate import LinearNDInterpolator
+
+# Re-defining the functions and data for O2 solubility
+def O2solubility(T, p_o2):
+    return (55.56 * p_o2) / (np.exp(3.71814 + 5596.17 / T - 1049668 / T**2) - p_o2)
+
+
+ppO2 = 0.19  # Partial pressure of O2
+
+# Defining temperature range
+temperatures = np.linspace(290, 360, 50)
+
+# Calculating O2 solubility in pure water
+solubilities_water = np.array([O2solubility(T, ppO2) for T in temperatures])
+
+# Placeholder values for MEA and Rooney, since previous functions and interpolators were lost
+solubilities_mea = np.array([O2solubility(T, ppO2) * 0.9 for T in temperatures])  # assumed 10% reduction due to MEA
+
+def RooneyO2(myTemp, myO2InFlueGas):
+    x1 = 1 / math.exp(3.71814 + (5596.17 / myTemp) - (1049668 / (myTemp**2)))
+    ppm1 = x1 * (32 / 18) * 1000000 * ppO2
+    rholiq = 1090.8  # Density of liquid assumed
+    MWO2 = 32  # Molar mass of O2
+    C1 = ppm1 * rholiq * 10**(-6) / MWO2
+    H = ppO2 * 1.0 / C1  # Assuming pressure = 1.0 bar
+    C_O2 = myO2InFlueGas * 1.0 / H
+    return C_O2
+
+# Assuming an example O2 content in flue gas as 0.15
+o2_in_flue_gas = 0.15
+solubilities_rooney = np.array([RooneyO2(T, o2_in_flue_gas) for T in temperatures])
+
+# Plotting all three calculations
+plt.figure(figsize=(10, 6))
+plt.plot(temperatures, solubilities_water, label='Pure O2 Solubility in Water', color='blue')
+plt.plot(temperatures, solubilities_mea, label='Adjusted O2 Solubility in MEA', color='green')
+plt.plot(temperatures, solubilities_rooney, label='Rooney O2 Calculation (Flue Gas)', color='red')
+plt.xlabel('Temperature (K)')
+plt.ylabel('O2 Solubility (mol/L)')
+plt.title('Comparison of O2 Solubility Models')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# Example usage within a plotting context
+fig, ax = plt.subplots()
+temperatures = np.linspace(290, 360, 50)
+solubilities = O2solubility(temperatures, ppO2)
+
+ax.plot(temperatures, solubilities, label='O2 Solubility')
+ax.set_xlabel('Temperature (K)')
+ax.set_ylabel('O2 Solubility (mol/L)')
+ax.grid(True)
+ax.set_title('Oxygen Solubility in Water at Different Temperatures')
+ax.legend()
+plt.show()
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Constants for CO2
+H0_CO2 = 29.41  # Henry's Law constant for CO2 at 298 K in atm*m3/mol
+DeltaH_CO2 = -2400  # Enthalpy change for CO2 dissolution in J/mol (typical values range from -2000 to -3000 J/mol)
+R = 8.314  # Universal gas constant J/(mol*K)
+T0 = 298.15  # Reference temperature in K
+
+def henrys_law_constant(T, H0=H0_CO2, DeltaH=DeltaH_CO2, T0=T0):
+    return H0 * np.exp(-DeltaH / R * (1/T - 1/T0))
+
+def CO2_solubility(P, T):
+    H = henrys_law_constant(T)
+    return P / H  # Solubility in mol/m^3
+
+# Plotting the solubility of CO2 across a range of temperatures
+fig, ax = plt.subplots()
+temperatures = np.linspace(280, 350, 70)  # Temperatures from 280 K to 350 K
+P_CO2 = 0.12  # Atmospheric partial pressure of CO2 in atm
+
+CO2_solubilities = [CO2_solubility(P_CO2, T) for T in temperatures]
+
+ax.plot(temperatures, CO2_solubilities, label='CO2 Solubility', color='green')
+ax.set_xlabel('Temperature (K)')
+ax.set_ylabel('CO2 Solubility (mol/m^3)')
+ax.grid(True)
+ax.set_title('CO2 Solubility in Water as a Function of Temperature')
+ax.legend()
+plt.show()
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Constants for CO2 and O2 solubility in MEA
+K_CO2 = 0.034  # Proportionality constant for CO2 absorption in MEA at 298 K (mol/L/bar)
+Ea_CO2 = 3000  # Activation energy for CO2 in MEA in J/mol
+
+def CO2_in_MEA(T, P_CO2, MEA_concentration):
+    # Adjusting K_CO2 based on temperature using an Arrhenius-like equation
+    K_temp_adjusted = K_CO2 * np.exp(-Ea_CO2 / R * (1/T - 1/298.15))
+    return P_CO2 * K_temp_adjusted * MEA_concentration  # CO2 solubility in mol/L
+
+def O2_in_MEA(T, P_O2):
+    # Assuming O2 follows Henry's Law with a correction factor for MEA presence
+    H_O2 = henrys_law_constant(T, H0=76900, DeltaH=-1800)  # Henry's constant for O2 in water
+    correction_factor = 1.1  # Assuming a slight decrease due to MEA
+    return P_O2 / (H_O2 * correction_factor)  # O2 solubility in mol/L
+
+# Example calculation and plotting
+fig, ax = plt.subplots()
+temperatures = np.linspace(280, 350, 70)
+P_CO2 = 0.15  # Partial pressure of CO2 in atm
+P_O2 = 0.21  # Partial pressure of O2 in atm
+MEA_concentration = 30  # MEA concentration in wt%
+
+CO2_solubilities = [CO2_in_MEA(T, P_CO2, MEA_concentration) for T in temperatures]
+O2_solubilities = [O2_in_MEA(T, P_O2) for T in temperatures]
+
+ax.plot(temperatures, CO2_solubilities, label='CO2 in MEA Solubility', color='red')
+ax.plot(temperatures, O2_solubilities, label='O2 in MEA Solubility', color='blue')
+ax.set_xlabel('Temperature (K)')
+ax.set_ylabel('Gas Solubility (mol/L)')
+ax.grid(True)
+ax.set_title('CO2 and O2 Solubility in MEA as a Function of Temperature')
+ax.legend()
+plt.show()
+
