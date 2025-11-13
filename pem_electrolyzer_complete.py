@@ -736,8 +736,10 @@ class DynamicPEMElectrolyzer:
             self.D_O2_eff[i] = D_O2 * ε_pore**1.5
 
             # Volumetric surface area [m²/m³]
-            catalyst_mass_per_volume = params_current.loading_aCL * 1e3 / params_current.L_aCL  # [kg/m³]
-            self.a_vol[i] = params_current.SA_IrOx * 1000 * catalyst_mass_per_volume  # [m²/m³]
+            # loading_aCL is in mg/cm² = 1e-3 g/cm² = 10 g/m²
+            loading_per_area = params_current.loading_aCL * 10.0  # [g/m²]
+            loading_per_volume = loading_per_area / params_current.L_aCL  # [g/m³]
+            self.a_vol[i] = params_current.SA_IrOx * loading_per_volume  # [m²/m³]
 
         # Membrane
         for i in self.mesh.idx_mem:
@@ -764,8 +766,10 @@ class DynamicPEMElectrolyzer:
             self.D_H2_eff[i] = D_H2 * ε_pore**1.5
             self.D_O2_eff[i] = D_O2 * ε_pore**1.5
 
-            catalyst_mass_per_volume = params_current.loading_cCL * 1e3 / params_current.L_cCL
-            self.a_vol[i] = params_current.SA_PtC * 1000 * catalyst_mass_per_volume
+            # loading_cCL is in mg/cm² = 1e-3 g/cm² = 10 g/m²
+            loading_per_area = params_current.loading_cCL * 10.0  # [g/m²]
+            loading_per_volume = loading_per_area / params_current.L_cCL  # [g/m³]
+            self.a_vol[i] = params_current.SA_PtC * loading_per_volume  # [m²/m³]
 
         # GDL
         for i in self.mesh.idx_GDL:
@@ -1195,26 +1199,26 @@ class Parameters:
 
     # Anode catalyst layer
     L_aCL: float = 6e-6
-    loading_aCL: float = 1.4    # [mg/cm²]
+    loading_aCL: float = 2.0    # [mg/cm²]
     SA_IrOx: float = 100.0      # [m²/g]
     w_cat_aCL: float = 0.78
     w_ion_aCL: float = 0.22
     σ_e_aCL: float = 1500.0     # [S/m]
-    j0_aCL_ref: float = 1e-7    # [A/m²_real] Exchange current density
-    b_aCL_ref: float = 0.042    # [V] Tafel slope
+    j0_aCL_ref: float = 0.5     # [A/m²_real] Moderate realistic value for IrO2
+    b_aCL_ref: float = 0.055    # [V] Realistic Tafel slope for OER (55 mV/dec)
     E_a_j0_aCL: float = 48e3    # [J/mol]
     E_a_b_aCL: float = -3800.0  # [J/mol]
     K_aCL: float = 1e-17        # [m²]
 
     # Cathode catalyst layer
     L_cCL: float = 12e-6
-    loading_cCL: float = 0.8
-    SA_PtC: float = 400.0
+    loading_cCL: float = 0.8    # [mg/cm²]
+    SA_PtC: float = 400.0       # [m²/g]
     w_cat_cCL: float = 0.64
     w_ion_cCL: float = 0.36
     σ_e_cCL: float = 300.0
-    j0_cCL_ref: float = 1.0     # [A/m²_real]
-    b_cCL_ref: float = 0.030    # [V]
+    j0_cCL_ref: float = 500.0   # [A/m²_real] Moderate realistic value for Pt (HER is fast)
+    b_cCL_ref: float = 0.035    # [V] Realistic Tafel slope for HER (35 mV/dec)
     E_a_j0_cCL: float = 18e3
     E_a_b_cCL: float = -5700.0
     K_cCL: float = 1e-17
