@@ -736,8 +736,10 @@ class DynamicPEMElectrolyzer:
             self.D_O2_eff[i] = D_O2 * ε_pore**1.5
 
             # Volumetric surface area [m²/m³]
-            catalyst_mass_per_volume = params_current.loading_aCL * 1e3 / params_current.L_aCL  # [kg/m³]
-            self.a_vol[i] = params_current.SA_IrOx * 1000 * catalyst_mass_per_volume  # [m²/m³]
+            # loading_aCL is in mg/cm² = 1e-3 g/cm² = 10 g/m²
+            loading_per_area = params_current.loading_aCL * 10.0  # [g/m²]
+            loading_per_volume = loading_per_area / params_current.L_aCL  # [g/m³]
+            self.a_vol[i] = params_current.SA_IrOx * loading_per_volume  # [m²/m³]
 
         # Membrane
         for i in self.mesh.idx_mem:
@@ -764,8 +766,10 @@ class DynamicPEMElectrolyzer:
             self.D_H2_eff[i] = D_H2 * ε_pore**1.5
             self.D_O2_eff[i] = D_O2 * ε_pore**1.5
 
-            catalyst_mass_per_volume = params_current.loading_cCL * 1e3 / params_current.L_cCL
-            self.a_vol[i] = params_current.SA_PtC * 1000 * catalyst_mass_per_volume
+            # loading_cCL is in mg/cm² = 1e-3 g/cm² = 10 g/m²
+            loading_per_area = params_current.loading_cCL * 10.0  # [g/m²]
+            loading_per_volume = loading_per_area / params_current.L_cCL  # [g/m³]
+            self.a_vol[i] = params_current.SA_PtC * loading_per_volume  # [m²/m³]
 
         # GDL
         for i in self.mesh.idx_GDL:
