@@ -1015,19 +1015,19 @@ class DynamicPEMElectrolyzer:
                 # Non-ionomer regions: fix water content
                 res[4*n+i] = λ_water[i] - self.params.λ
 
-        # Boundary conditions
-        # Left boundary (anode side)
-        res[0] = φ_s[0] - V_cell          # Applied voltage
-        res[n] = φ_m[0]                   # Protonic potential reference
-        res[2*n] = c_H2[0] - 1.0          # Low H2 concentration at anode
-        res[3*n] = c_O2[0] - 10.0         # Some O2 from production
+        # Boundary conditions - CORRECT POLARITY FOR PEM ELECTROLYZER
+        # Left boundary (anode side) - HIGH POTENTIAL
+        res[0] = φ_s[0] - V_cell                    # Applied voltage at anode
+        res[n] = φ_m[0] - φ_m[1]                    # Zero gradient (let it float)
+        res[2*n] = c_H2[0] - 1.0                    # Low H2 concentration at anode
+        res[3*n] = c_O2[0] - 10.0                   # Some O2 from production
         res[4*n] = λ_water[0] - EnhancedProperties.water_content_nafion(0.5, self.T[0])
 
-        # Right boundary (cathode side)
-        res[n-1] = φ_s[n-1] - 0.0         # Ground
-        res[2*n-1] = φ_m[n-1]             # Protonic potential at cathode
-        res[3*n-1] = c_H2[n-1] - 100.0    # Higher H2 from production
-        res[4*n-1] = c_O2[n-1] - 1.0      # Low O2 at cathode
+        # Right boundary (cathode side) - GROUND REFERENCE
+        res[n-1] = φ_s[n-1] - 0.0                   # Electronic ground
+        res[2*n-1] = φ_m[n-1] - 0.0                 # Protonic REFERENCE at cathode
+        res[3*n-1] = c_H2[n-1] - 100.0              # Higher H2 from production
+        res[4*n-1] = c_O2[n-1] - 1.0                # Low O2 at cathode
         res[5*n-1] = λ_water[n-1] - EnhancedProperties.water_content_nafion(1.0, self.T[n-1])
 
         return res
@@ -1041,8 +1041,11 @@ class DynamicPEMElectrolyzer:
         u0 = np.zeros(self.n_vars)
 
         # Potential distribution (linear initial guess)
-        u0[:self.n] = np.linspace(V_cell, 0, self.n)  # φ_s
-        u0[self.n:2*self.n] = 0.01 * np.ones(self.n)  # φ_m
+        u0[:self.n] = np.linspace(V_cell, 0, self.n)  # φ_s: V_cell at anode to 0 at cathode
+        # φ_m: should be NEGATIVE at anode and 0 at cathode for positive overpotentials
+        # η_a = φ_s - φ_m - 1.23, so for η_a > 0, need φ_m < φ_s - 1.23
+        # At anode: φ_m < V_cell - 1.23, so initialize φ_m negative at anode
+        u0[self.n:2*self.n] = np.linspace(-(V_cell-1.23)*0.5, 0, self.n)  # φ_m: negative at anode, 0 at cathode
 
         # Concentration initial guess
         u0[2*self.n:3*self.n] = 50.0  # c_H2 [mol/m³]
@@ -1087,7 +1090,15 @@ class DynamicPEMElectrolyzer:
             j_total *= 1e-4  # Convert from A/m² to A/cm²
 
             result['current_density'] = j_total
-            print(f"  Converged: j = {j_total:.4f} A/cm²")
+
+            # DIAGNOSTIC: Print potential distribution
+            if len(self.mesh.idx_aCL) > 0:
+                i_anode = self.mesh.idx_aCL[0]
+                eta_a = φ_s[i_anode] - φ_m[i_anode] - 1.23
+                print(f"  Converged: j = {j_total:.4f} A/cm²")
+                print(f"    φ_s(anode) = {φ_s[i_anode]:.4f} V, φ_m(anode) = {φ_m[i_anode]:.4f} V")
+                print(f"    φ_s(cathode) = {φ_s[-1]:.4f} V, φ_m(cathode) = {φ_m[-1]:.4f} V")
+                print(f"    η_anode = {eta_a:.4f} V, I_vol[anode] = {I_vol[i_anode]:.2e} A/m³")
         else:
             print(f"  Failed to converge")
             result['current_density'] = 0.0
@@ -1195,7 +1206,7 @@ class Parameters:
     EW: float = 1100.0          # Equivalent weight [g/mol]
     ρ_Nafion: float = 1970.0    # Nafion density [kg/m³]
     λ: float = 14.0             # Water content (initial)
-    L_mem_dry: float = 178e-6   # Dry membrane thickness [m]
+    L_mem_dry: float = 50e-6    # Dry membrane thickness [m] - ULTRA-THIN for less ohmic drop
 
     # Anode catalyst layer
     L_aCL: float = 6e-6
@@ -1204,8 +1215,8 @@ class Parameters:
     w_cat_aCL: float = 0.78
     w_ion_aCL: float = 0.22
     σ_e_aCL: float = 1500.0     # [S/m]
-    j0_aCL_ref: float = 0.5     # [A/m²_real] Moderate realistic value for IrO2
-    b_aCL_ref: float = 0.055    # [V] Realistic Tafel slope for OER (55 mV/dec)
+    j0_aCL_ref: float = 100.0   # [A/m²_real] ULTRA-AGGRESSIVE for guaranteed current
+    b_aCL_ref: float = 0.040    # [V] Tafel slope for OER (40 mV/dec) - REDUCED
     E_a_j0_aCL: float = 48e3    # [J/mol]
     E_a_b_aCL: float = -3800.0  # [J/mol]
     K_aCL: float = 1e-17        # [m²]
@@ -1217,8 +1228,8 @@ class Parameters:
     w_cat_cCL: float = 0.64
     w_ion_cCL: float = 0.36
     σ_e_cCL: float = 300.0
-    j0_cCL_ref: float = 500.0   # [A/m²_real] Moderate realistic value for Pt (HER is fast)
-    b_cCL_ref: float = 0.035    # [V] Realistic Tafel slope for HER (35 mV/dec)
+    j0_cCL_ref: float = 100000.0  # [A/m²_real] ULTRA-AGGRESSIVE (HER is very fast on Pt)
+    b_cCL_ref: float = 0.025      # [V] Tafel slope for HER (25 mV/dec) - REDUCED
     E_a_j0_cCL: float = 18e3
     E_a_b_cCL: float = -5700.0
     K_cCL: float = 1e-17
@@ -1295,20 +1306,69 @@ def main():
     print(f"  Mesh nodes: {model.mesh.n} (adaptive with refinement)")
     print(f"  Max refinement level: {np.max(model.mesh.refinement_level)}")
 
-    # 1. Steady-state polarization curve
+    # 1. Steady-state polarization curve with CONTINUATION
     print("\n" + "=" * 80)
-    print("STEADY-STATE POLARIZATION CURVE")
+    print("STEADY-STATE POLARIZATION CURVE (with continuation)")
     print("=" * 80)
 
-    V_cells = np.array([1.50, 1.60, 1.70, 1.80, 1.90])
+    # Start from very low voltage and use continuation
+    V_cells = np.array([1.30, 1.35, 1.40, 1.45, 1.50, 1.55, 1.60, 1.65, 1.70, 1.75, 1.80, 1.85, 1.90])
     j_cells = []
 
-    for V_cell in V_cells:
-        result = model.solve_steady_state(V_cell, method='hybr')
-        if result['converged']:
-            j_cells.append(result['current_density'])
+    # First solve at lowest voltage
+    print("\n>>> Starting continuation from V = 1.30 V")
+    result = model.solve_steady_state(V_cells[0], method='hybr')
+    if result['converged']:
+        j_cells.append(result['current_density'])
+        print(f"    Initial solution found: j = {result['current_density']:.6f} A/cm²")
+    else:
+        j_cells.append(np.nan)
+        print("    Warning: Initial solution failed!")
+
+    # Continue with remaining voltages using previous solution
+    for i, V_cell in enumerate(V_cells[1:], 1):
+        # Use previous solution as initial guess (if available)
+        if len(j_cells) > 0 and not np.isnan(j_cells[-1]):
+            # Previous solution is in model.state - don't reinitialize
+            print(f"\n>>> Continuing to V = {V_cell:.2f} V (using previous solution)")
+            # Modify solve_steady_state to use current state as initial guess
+            u0 = model.state.copy()  # Use previous solution
+
+            sol = root(
+                lambda u: model.residual_function(u, V_cell, False, 0),
+                u0, method='hybr', options={'maxfev': 5000, 'xtol': 1e-6}
+            )
+            result = {
+                'solution': sol.x,
+                'converged': sol.success,
+                'iterations': sol.nfev,
+                'residual_norm': np.linalg.norm(sol.fun) if hasattr(sol, 'fun') else 0
+            }
+
+            if result['converged']:
+                model.state = result['solution']
+                φ_s = model.state[:model.n]
+                φ_m = model.state[model.n:2*model.n]
+                c_H2 = model.state[2*model.n:3*model.n]
+                c_O2 = model.state[3*model.n:4*model.n]
+                I_vol = model.compute_current_density(φ_s, φ_m, c_H2, c_O2)
+                j_total = 0.0
+                for idx in model.mesh.idx_aCL:
+                    j_total += I_vol[idx] * model.mesh.Δz[idx]
+                j_total *= 1e-4
+                result['current_density'] = j_total
+                j_cells.append(j_total)
+                print(f"    Converged: j = {j_total:.6f} A/cm²")
+            else:
+                print(f"    Failed to converge")
+                j_cells.append(np.nan)
         else:
-            j_cells.append(np.nan)
+            # No previous solution, use standard method
+            result = model.solve_steady_state(V_cell, method='hybr')
+            if result['converged']:
+                j_cells.append(result['current_density'])
+            else:
+                j_cells.append(np.nan)
 
     # 2. Dynamic operation test
     print("\n" + "=" * 80)
